@@ -7,6 +7,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chess_template = { git = "https://github.com/INDAPlus21/chess-template.git" } # Replace this with the library you want to use
+chess_template = { git = "https://github.com/IndaPlus22/eskilny-task-3.git" } # Replace this with the library you want to use
 linked-hash-map = "0.5.4" 
 ggez = "0.6.1"
