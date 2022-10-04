@@ -1,9 +1,7 @@
-use chess_template::{Colour, Game, PieceType};
+use chess_template::{Colour, Game, PieceType, Position};
 /**
- * Chess GUI template.
- * Author: Viola Söderlund <violaso@kth.se>
- * Edited: Isak Larsson <isaklar@kth.se>
- * Last updated: 2022-09-28
+ * Chess GUI .
+ * Author: Vilhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>
  */
 use ggez::{conf, event, graphics, Context, ContextBuilder, GameError, GameResult};
 use std::{collections::HashMap, env, path};
@@ -31,6 +29,8 @@ struct AppState {
     sprites: HashMap<(Colour, PieceType), graphics::Image>, // For easy access to the apropriate PNGs
     board: [[Option<(Colour, PieceType)>; 8]; 8], // Or whatever way you prefer to represent the board
     game: Game, // Save piece positions, which tiles has been clicked, current colour, etc...
+    positions: Vec<Position>, // Save the position of each tile
+    selected_position: Option<Position>, // hold position of the selected piece
 }
 
 impl AppState {
@@ -66,6 +66,8 @@ impl AppState {
                 royal_rank(Colour::White),
             ],
             game: Game::new(),
+            positions: Vec::new(),
+            selected_position: None,
         };
 
         Ok(state)
@@ -182,6 +184,27 @@ impl event::EventHandler<GameError> for AppState {
                     )
                     .expect("Failed to draw piece.");
                 }
+
+                // draw dot on possible moves for selected piece
+                if self
+                    .positions
+                    .contains(&Position::new(row as usize, col as usize).unwrap())
+                {
+                    let dot = graphics::Mesh::new_circle(
+                        ctx,
+                        graphics::DrawMode::fill(),
+                        [
+                            col as f32 * GRID_CELL_SIZE.0 as f32 + 45.0,
+                            row as f32 * GRID_CELL_SIZE.1 as f32 + 45.0,
+                        ],
+                        10.0,
+                        0.1,
+                        [1.0, 0.0, 0.0, 1.0].into(),
+                    )
+                    .expect("Failed to create dot.");
+                    graphics::draw(ctx, &dot, graphics::DrawParam::default())
+                        .expect("Failed to draw dot.");
+                }
             }
         }
 
@@ -214,6 +237,51 @@ impl event::EventHandler<GameError> for AppState {
     ) {
         if button == event::MouseButton::Left {
             /* check click position and update board accordingly */
+            // each tile is 90x90 pixels, so we can divide the click position by 90 to get the tile
+            let row = (y / GRID_CELL_SIZE.1 as f32) as usize;
+            let col = (x / GRID_CELL_SIZE.0 as f32) as usize;
+
+            // check if the selected position has a piece and that it's the player's turn
+            if let Some(piece) = self.board[row][col] {
+                if piece.0 == self.game.get_active_colour() {
+                    // print something cool!
+                    println!(
+                        "Selected piece has color of the current turn!!: {:?}",
+                        piece
+                    );
+
+                    // convert row and column to Position
+                    let position = Position::new(row, col);
+
+                    // get possible moves for the selected piece
+                    let available_moves = self.game.get_possible_moves(position.unwrap(), 0);
+
+                    // set available moves to App State
+                    self.positions = available_moves;
+
+                    // set selected position to App State
+                    self.selected_position = Some(Position::new(row, col).unwrap());
+
+                    // print available moves for this position
+                    // DEBUG
+                    // println!(
+                    //     "Available moves for {:?} at ({}, {}): {:?}",
+                    //     self.board[row][col], row, col, &available_moves
+                    // );
+                }
+            }
+
+            // check if clicked position is in self.positions
+            if self.positions.contains(&Position::new(row, col).unwrap()) {
+                // print something cool!
+                println!("Clicked position is in available moves!! Wohoo!");
+
+                // // make move
+                // self.game.make_move(
+                //     self.selected_position.unwrap(),
+                //     Position::new(row, col).unwrap(),
+                // );
+            }
         }
     }
 }
@@ -221,18 +289,22 @@ impl event::EventHandler<GameError> for AppState {
 pub fn main() -> GameResult {
     let resource_dir = path::PathBuf::from("./resources");
 
-    let context_builder = ContextBuilder::new("schack", "viola")
-        .add_resource_path(resource_dir) // Import image files to GGEZ
-        .window_setup(
-            conf::WindowSetup::default()
-                .title("Schack") // Set window title "Schack"
-                .icon("/icon.png"), // Set application icon
-        )
-        .window_mode(
-            conf::WindowMode::default()
-                .dimensions(SCREEN_SIZE.0, SCREEN_SIZE.1) // Set window dimensions
-                .resizable(false), // Fixate window size
-        );
+    let context_builder = ContextBuilder::new(
+        "schack",
+        "Vlhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>",
+    )
+    .add_resource_path(resource_dir) // Import image files to GGEZ
+    .window_setup(
+        conf::WindowSetup::default()
+            .title("Schack") // Set window title "Schack"
+            .vsync(false) // Disable vsync
+            .icon("/icon.png"), // Set application icon
+    )
+    .window_mode(
+        conf::WindowMode::default()
+            .dimensions(SCREEN_SIZE.0, SCREEN_SIZE.1) // Set window dimensions
+            .resizable(false), // Fixate window size
+    );
     let (mut contex, mut event_loop) = context_builder.build().expect("Failed to build context.");
 
     let state = AppState::new(&mut contex).expect("Failed to create state.");
