@@ -27,7 +27,6 @@ const WHITE: graphics::Color =
 ///
 struct AppState {
     sprites: HashMap<(Colour, PieceType), graphics::Image>, // For easy access to the apropriate PNGs
-    board: [[Option<(Colour, PieceType)>; 8]; 8], // Or whatever way you prefer to represent the board
     game: Game, // Save piece positions, which tiles has been clicked, current colour, etc...
     positions: Vec<Position>, // Save the position of each tile
     selected_position: Option<Position>, // hold position of the selected piece
@@ -38,33 +37,9 @@ impl AppState {
     fn new(ctx: &mut Context) -> GameResult<AppState> {
         // A cool way to instantiate the board
         // You can safely delete this if the chess-library already does this
-        let royal_rank = |colour| {
-            [
-                Some((colour, PieceType::Rook)),
-                Some((colour, PieceType::Knight)),
-                Some((colour, PieceType::Bishop)),
-                Some((colour, PieceType::Queen)),
-                Some((colour, PieceType::King)),
-                Some((colour, PieceType::Rook)),
-                Some((colour, PieceType::Knight)),
-                Some((colour, PieceType::Bishop)),
-            ]
-        };
-        let pawn_rank = |colour| [Some((colour, PieceType::Pawn)); 8];
-        let empty_rank = || [None; 8];
 
         let state = AppState {
             sprites: AppState::load_sprites(ctx),
-            board: [
-                royal_rank(Colour::Black),
-                pawn_rank(Colour::Black),
-                empty_rank(),
-                empty_rank(),
-                empty_rank(),
-                empty_rank(),
-                pawn_rank(Colour::White),
-                royal_rank(Colour::White),
-            ],
             game: Game::new(),
             positions: Vec::new(),
             selected_position: None,
@@ -174,11 +149,13 @@ impl event::EventHandler<GameError> for AppState {
                 graphics::draw(ctx, &rectangle, graphics::DrawParam::default())
                     .expect("Failed to draw tiles.");
 
-                // draw piece
-                if let Some(piece) = self.board[row as usize][col as usize] {
+                // convert row and col to idx
+                let idx = row * 8 + col;
+
+                if let Some(piece) = self.game.get_board()[idx as usize] {
                     graphics::draw(
                         ctx,
-                        self.sprites.get(&piece).unwrap(),
+                        self.sprites.get(&(piece.colour, piece.piece_type)).unwrap(),
                         graphics::DrawParam::default()
                             .scale([2.0, 2.0]) // Tile size is 90 pixels, while image sizes are 45 pixels.
                             .dest([
@@ -234,7 +211,7 @@ impl event::EventHandler<GameError> for AppState {
     /// Update game on mouse click
     fn mouse_button_up_event(
         &mut self,
-        ctx: &mut Context,
+        _ctx: &mut Context,
         button: event::MouseButton,
         x: f32,
         y: f32,
@@ -245,15 +222,12 @@ impl event::EventHandler<GameError> for AppState {
             let row = (y / GRID_CELL_SIZE.1 as f32) as usize;
             let col = (x / GRID_CELL_SIZE.0 as f32) as usize;
 
-            // check if the selected position has a piece and that it's the player's turn
-            if let Some(piece) = self.board[row][col] {
-                if piece.0 == self.game.get_active_colour() {
-                    // print something cool!
-                    println!(
-                        "Selected piece has color of the current turn!!: {:?}",
-                        piece
-                    );
+            // convert row, col to idx
+            let idx = row * 8 + col;
 
+            // check if the selected position has a piece and that it's the player's turn
+            if let Some(piece) = self.game.get_board()[idx] {
+                if piece.colour == self.game.get_active_colour() {
                     // convert row and column to Position
                     let position = Position::new(row, col);
 
@@ -265,43 +239,23 @@ impl event::EventHandler<GameError> for AppState {
 
                     // set selected position to App State
                     self.selected_position = Some(Position::new(row, col).unwrap());
-
-                    // print available moves for this position
-                    // DEBUG
-                    // println!(
-                    //     "Available moves for {:?} at ({}, {}): {:?}",
-                    //     self.board[row][col], row, col, &available_moves
-                    // );
                 }
             }
 
             // check if clicked position is in self.positions
             if self.positions.contains(&Position::new(row, col).unwrap()) {
                 // print something cool!
-                println!("Clicked position is in available moves!! Wohoo!");
 
                 let new_game_state = self.game.make_move_pos(
                     self.selected_position.unwrap(),
                     Position::new(row, col).unwrap(),
                 );
 
-                // print selected_position and clicked position
-                // DEBUG
-                println!(
-                    "Selected position: {:?}, Clicked position: {:?}",
-                    self.selected_position,
-                    Position::new(row, col)
-                );
-
-                // print new game state
-                // DEBUG
-                println!("New game state: {:?}", new_game_state);
-
-                // // make move
-                // self.game.make_move(
-                //     self.selected_position.unwrap(),
-                //     Position::new(row, col).unwrap(),
-                // );
+                // if new_game_state.is_ok(), then the move was successful and we remove the selected position
+                if new_game_state.is_ok() {
+                    self.selected_position = None;
+                    self.positions = vec![];
+                }
             }
         }
     }
@@ -325,7 +279,7 @@ pub fn main() -> GameResult {
             .dimensions(SCREEN_SIZE.0, SCREEN_SIZE.1) // Set window dimensions
             .resizable(false), // Fixate window size
     );
-    let (mut contex, mut event_loop) = context_builder.build().expect("Failed to build context.");
+    let (mut contex, event_loop) = context_builder.build().expect("Failed to build context.");
 
     let state = AppState::new(&mut contex).expect("Failed to create state.");
     event::run(contex, event_loop, state) // Run window event loop
