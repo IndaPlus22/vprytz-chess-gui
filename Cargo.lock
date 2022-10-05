@@ -269,7 +269,7 @@ dependencies = [
 [[package]]
 name = "chess_template"
 version = "0.1.0"
-source = "git+https://github.com/IndaPlus22/eskilny-task-3.git#c7152cbf5c821871d1fb1a868a916cdb848d6a1b"
+source = "git+https://github.com/IndaPlus22/eskilny-task-3.git#03855714c1c79e7ca29429e6fe693d80baa7b810"
 
 [[package]]
 name = "clang-sys"

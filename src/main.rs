@@ -86,14 +86,22 @@ impl event::EventHandler<GameError> for AppState {
         // clear interface with gray background colour
         graphics::clear(ctx, [0.5, 0.5, 0.5, 1.0].into());
 
-        // create text representation
-        let state_text = graphics::Text::new(
-            graphics::TextFragment::from(format!(
+        let splash_text: String;
+
+        // if game state is GameOver, draw game over screen
+        if self.game.get_game_state() == chess_template::GameState::GameOver {
+            splash_text = "Game Over, press R to restart!".to_string();
+        } else {
+            splash_text = format!(
                 "Game is {:?}, it's {:?} turn.",
                 self.game.get_game_state(),
                 self.game.get_active_colour()
-            ))
-            .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
+            );
+        }
+
+        // create text representation
+        let state_text = graphics::Text::new(
+            graphics::TextFragment::from(splash_text).scale(graphics::PxScale { x: 30.0, y: 30.0 }),
         );
 
         // get size of text
@@ -257,6 +265,27 @@ impl event::EventHandler<GameError> for AppState {
                     self.positions = vec![];
                 }
             }
+        }
+    }
+
+    fn key_down_event(
+        &mut self,
+        ctx: &mut Context,
+        key: event::KeyCode,
+        _mods: event::KeyMods,
+        _: bool,
+    ) {
+        match key {
+            // Quit if escape is pressed
+            event::KeyCode::Escape => {
+                event::quit(ctx);
+            }
+            event::KeyCode::R => {
+                self.game = Game::new();
+                self.positions = vec![];
+                self.selected_position = None;
+            }
+            _ => (),
         }
     }
 }
