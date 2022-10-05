@@ -318,7 +318,6 @@ pub fn main() -> GameResult {
     .window_setup(
         conf::WindowSetup::default()
             .title("Schack") // Set window title "Schack"
-            .vsync(false) // Disable vsync
             .icon("/icon.png"), // Set application icon
     )
     .window_mode(
