@@ -4,7 +4,7 @@ use chess_template::{Colour, Game, PieceType, Position};
  * Author: Vilhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>
  */
 use ggez::{conf, event, graphics, Context, ContextBuilder, GameError, GameResult};
-use std::{collections::HashMap, env, path};
+use std::{collections::HashMap, path};
 
 /// A chess board is 8x8 tiles.
 const GRID_SIZE: i16 = 8;
@@ -113,8 +113,12 @@ impl event::EventHandler<GameError> for AppState {
 
         // create text representation
         let state_text = graphics::Text::new(
-            graphics::TextFragment::from(format!("Game is {:?}.", self.game.get_game_state()))
-                .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
+            graphics::TextFragment::from(format!(
+                "Game is {:?}, it's {:?} turn.",
+                self.game.get_game_state(),
+                self.game.get_active_colour()
+            ))
+            .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
         );
 
         // get size of text
@@ -275,6 +279,23 @@ impl event::EventHandler<GameError> for AppState {
             if self.positions.contains(&Position::new(row, col).unwrap()) {
                 // print something cool!
                 println!("Clicked position is in available moves!! Wohoo!");
+
+                let new_game_state = self.game.make_move_pos(
+                    self.selected_position.unwrap(),
+                    Position::new(row, col).unwrap(),
+                );
+
+                // print selected_position and clicked position
+                // DEBUG
+                println!(
+                    "Selected position: {:?}, Clicked position: {:?}",
+                    self.selected_position,
+                    Position::new(row, col)
+                );
+
+                // print new game state
+                // DEBUG
+                println!("New game state: {:?}", new_game_state);
 
                 // // make move
                 // self.game.make_move(
