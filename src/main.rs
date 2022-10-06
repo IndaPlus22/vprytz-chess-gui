@@ -295,7 +295,7 @@ pub fn main() -> GameResult {
 
     let context_builder = ContextBuilder::new(
         "schack",
-        "Vlhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>",
+        "Vilhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>",
     )
     .add_resource_path(resource_dir) // Import image files to GGEZ
     .window_setup(
