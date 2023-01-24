@@ -4,10 +4,11 @@ use chess_template::{Colour, Game, PieceType, Position};
  * Author: Vilhelm Prytz <vilhelm@prytznet.se> / <vprytz@kth.se>
  */
 use ggez::{conf, event, graphics, Context, ContextBuilder, GameError, GameResult};
+use std::process::exit;
 use std::{collections::HashMap, path};
 
 // for online play
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
@@ -44,11 +45,16 @@ struct AppState {
     positions: Vec<Position>, // Save the position of each tile
     selected_position: Option<Position>, // hold position of the selected piece
     sender: mpsc::Sender<String>, // for sending messages to server
+    to_mainthread_receiver: mpsc::Receiver<String>, // for sending messages from network thread to main thread
 }
 
 impl AppState {
     /// Initialise new application, i.e. initialise new game and load resources.
-    fn new(ctx: &mut Context, sender: mpsc::Sender<String>) -> GameResult<AppState> {
+    fn new(
+        ctx: &mut Context,
+        sender: mpsc::Sender<String>,
+        to_mainthread_receiver: mpsc::Receiver<String>,
+    ) -> GameResult<AppState> {
         // A cool way to instantiate the board
         // You can safely delete this if the chess-library already does this
 
@@ -58,6 +64,7 @@ impl AppState {
             positions: Vec::new(),
             selected_position: None,
             sender: sender, // mpsc::Sender::clone(&sender)
+            to_mainthread_receiver: to_mainthread_receiver,
         };
 
         Ok(state)
@@ -93,6 +100,63 @@ impl event::EventHandler<GameError> for AppState {
     /// For updating game logic, which front-end doesn't handle.
     /// It won't be necessary to touch this unless you are implementing something that's not triggered by the user, like a clock
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
+        // check if there is a message from the network thread
+        match self.to_mainthread_receiver.try_recv() {
+            // received message from channel
+            Ok(msg) => {
+                let mut msg_buffer = msg.clone().into_bytes();
+                // add zero character to mark end of message
+                msg_buffer.resize(MSG_SIZE, 0);
+
+                // convert message to string
+                let msg = String::from_utf8(msg_buffer).unwrap();
+
+                // split message into turn and from_pos (row, col) and to_pos (row, col)
+                // example: W 1 1 3 3
+                // means turn is White, and the piece at (1, 1) is moving to (3, 3)
+                let mut msg = msg.split_whitespace();
+
+                // get turn
+                let turn = msg.next().unwrap();
+
+                // get from_pos
+                let from_pos_row = msg.next().unwrap();
+                let from_pos_col = msg.next().unwrap();
+                let from_pos = Position::new(
+                    from_pos_row.parse::<usize>().unwrap(),
+                    from_pos_col.parse::<usize>().unwrap(),
+                )
+                .unwrap();
+                println!("from_pos: {:?}", from_pos);
+
+                // get to_pos
+                let to_pos_row = msg.next().unwrap();
+                let to_pos_col = msg.next().unwrap();
+                println!("to_pos_row: {:?}", to_pos_row);
+                println!("to_pos_col: {:?}", to_pos_col);
+
+                let to_pos = Position::new(
+                    to_pos_row.parse::<usize>().unwrap(),
+                    to_pos_col.parse::<usize>().unwrap(),
+                )
+                .unwrap();
+                println!("to_pos: {:?}", to_pos);
+
+                // make move using message from server
+                let new_game_state = self.game.make_move_pos(from_pos, to_pos);
+
+                // if new_game_state.is_ok(), then the move was successful and we remove the selected position
+                if new_game_state.is_ok() {
+                    self.selected_position = None;
+                    self.positions = vec![];
+                }
+            }
+            // no message in channel
+            Err(TryRecvError::Empty) => (),
+            // channel has been disconnected (main thread has terminated)
+            Err(TryRecvError::Disconnected) => exit(1),
+        }
+
         Ok(())
     }
 
@@ -269,8 +333,8 @@ impl event::EventHandler<GameError> for AppState {
             if self.positions.contains(&Position::new(row, col).unwrap()) {
                 // get current turn color as string
                 let turn = match self.game.get_active_colour() {
-                    Colour::White => "White",
-                    Colour::Black => "Black",
+                    Colour::White => "W",
+                    Colour::Black => "B",
                 };
 
                 let new_game_state = self.game.make_move_pos(
@@ -278,13 +342,20 @@ impl event::EventHandler<GameError> for AppState {
                     Position::new(row, col).unwrap(),
                 );
 
-                // get position to move to
-                let position = format!("{} {}", row, col);
+                // get position in nice format to move from and to
+                let to_position = format!("{} {}", row, col);
+                let from_position = format!(
+                    "{} {}",
+                    self.selected_position.unwrap().row,
+                    self.selected_position.unwrap().col,
+                );
 
                 // if new_game_state.is_ok(), then the move was successful and we remove the selected position
                 if new_game_state.is_ok() {
                     // send move to server
-                    self.sender.send(format!("{} {}", turn, position)).unwrap();
+                    self.sender
+                        .send(format!("{} {} {} ", turn, from_position, to_position))
+                        .unwrap();
 
                     self.selected_position = None;
                     self.positions = vec![];
@@ -315,7 +386,10 @@ impl event::EventHandler<GameError> for AppState {
     }
 }
 
-fn online_setup() -> std::sync::mpsc::Sender<String> {
+fn online_setup() -> (
+    std::sync::mpsc::Sender<String>,
+    std::sync::mpsc::Receiver<String>,
+) {
     // Copied mostly from https://github.com/IndaPlus22/AssignmentInstructions-BlueNote/blob/main/task-14/rust-example/client/src/main.rs
     // Original Author: Tensor-Programming, Viola Söderlund <violaso@kth.se>
 
@@ -335,8 +409,11 @@ fn online_setup() -> std::sync::mpsc::Sender<String> {
         .set_nonblocking(true)
         .expect("Failed to initiate non-blocking!");
 
-    // create channel for communication between threads
+    // create channel for communication between threads, from main thread to network thread
     let (sender, receiver) = mpsc::channel::<String>();
+
+    // create channel for communication between threads, from network thread to main thread
+    let (to_mainthread_sender, to_mainthread_receiver) = mpsc::channel::<String>();
 
     /* Start thread that listens to server. */
     thread::spawn(move || loop {
@@ -354,6 +431,8 @@ fn online_setup() -> std::sync::mpsc::Sender<String> {
                 let msg = String::from_utf8(_msg).expect("Invalid UTF-8 message!");
 
                 println!("Message: {:?}", msg);
+                // send this message to main thread
+                to_mainthread_sender.send(format!("{:?}", msg)).unwrap();
             }
             // no message in stream
             Err(ref err) if err.kind() == ErrorKind::WouldBlock => (),
@@ -382,10 +461,10 @@ fn online_setup() -> std::sync::mpsc::Sender<String> {
             Err(TryRecvError::Disconnected) => break,
         }
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(30));
     });
 
-    return sender;
+    return (sender, to_mainthread_receiver);
 }
 
 pub fn main() -> GameResult {
@@ -409,9 +488,10 @@ pub fn main() -> GameResult {
     let (mut contex, event_loop) = context_builder.build().expect("Failed to build context.");
 
     // connect to our server
-    let sender = online_setup();
+    let (sender, to_mainthread_receiver) = online_setup();
 
-    let state = AppState::new(&mut contex, sender).expect("Failed to create state.");
+    let state = AppState::new(&mut contex, sender, to_mainthread_receiver)
+        .expect("Failed to create state.");
 
     event::run(contex, event_loop, state) // Run window event loop
 }
