@@ -6,6 +6,19 @@ use chess_template::{Colour, Game, PieceType, Position};
 use ggez::{conf, event, graphics, Context, ContextBuilder, GameError, GameResult};
 use std::{collections::HashMap, path};
 
+// for online play
+use std::io::{self, ErrorKind, Read, Write};
+use std::net::TcpStream;
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
+use std::time::Duration;
+
+/* address to server. */
+const SERVER_ADDR: &str = "127.0.0.1:6000";
+
+/* max message size in characters. */
+const MSG_SIZE: usize = 64;
+
 /// A chess board is 8x8 tiles.
 const GRID_SIZE: i16 = 8;
 /// Sutible size of each tile.
@@ -30,11 +43,12 @@ struct AppState {
     game: Game, // Save piece positions, which tiles has been clicked, current colour, etc...
     positions: Vec<Position>, // Save the position of each tile
     selected_position: Option<Position>, // hold position of the selected piece
+    sender: mpsc::Sender<String>, // for sending messages to server
 }
 
 impl AppState {
     /// Initialise new application, i.e. initialise new game and load resources.
-    fn new(ctx: &mut Context) -> GameResult<AppState> {
+    fn new(ctx: &mut Context, sender: mpsc::Sender<String>) -> GameResult<AppState> {
         // A cool way to instantiate the board
         // You can safely delete this if the chess-library already does this
 
@@ -43,6 +57,7 @@ impl AppState {
             game: Game::new(),
             positions: Vec::new(),
             selected_position: None,
+            sender: sender, // mpsc::Sender::clone(&sender)
         };
 
         Ok(state)
@@ -252,15 +267,25 @@ impl event::EventHandler<GameError> for AppState {
 
             // check if clicked position is in self.positions
             if self.positions.contains(&Position::new(row, col).unwrap()) {
-                // print something cool!
+                // get current turn color as string
+                let turn = match self.game.get_active_colour() {
+                    Colour::White => "White",
+                    Colour::Black => "Black",
+                };
 
                 let new_game_state = self.game.make_move_pos(
                     self.selected_position.unwrap(),
                     Position::new(row, col).unwrap(),
                 );
 
+                // get position to move to
+                let position = format!("{} {}", row, col);
+
                 // if new_game_state.is_ok(), then the move was successful and we remove the selected position
                 if new_game_state.is_ok() {
+                    // send move to server
+                    self.sender.send(format!("{} {}", turn, position)).unwrap();
+
                     self.selected_position = None;
                     self.positions = vec![];
                 }
@@ -290,6 +315,79 @@ impl event::EventHandler<GameError> for AppState {
     }
 }
 
+fn online_setup() -> std::sync::mpsc::Sender<String> {
+    // Copied mostly from https://github.com/IndaPlus22/AssignmentInstructions-BlueNote/blob/main/task-14/rust-example/client/src/main.rs
+    // Original Author: Tensor-Programming, Viola Söderlund <violaso@kth.se>
+
+    // connect to server
+    let mut client = match TcpStream::connect(SERVER_ADDR) {
+        Ok(_client) => {
+            println!("Connected to server at: {}", SERVER_ADDR);
+            _client
+        }
+        Err(_) => {
+            println!("Failed to connect to server at: {}", SERVER_ADDR);
+            std::process::exit(1)
+        }
+    };
+    // prevent io stream operation from blocking socket in case of slow communication
+    client
+        .set_nonblocking(true)
+        .expect("Failed to initiate non-blocking!");
+
+    // create channel for communication between threads
+    let (sender, receiver) = mpsc::channel::<String>();
+
+    /* Start thread that listens to server. */
+    thread::spawn(move || loop {
+        let mut msg_buffer = vec![0; MSG_SIZE];
+
+        /* Read message from server. */
+        match client.read_exact(&mut msg_buffer) {
+            // received message
+            Ok(_) => {
+                // read until end-of-message (zero character)
+                let _msg = msg_buffer
+                    .into_iter()
+                    .take_while(|&x| x != 0)
+                    .collect::<Vec<_>>();
+                let msg = String::from_utf8(_msg).expect("Invalid UTF-8 message!");
+
+                println!("Message: {:?}", msg);
+            }
+            // no message in stream
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => (),
+            // connection error
+            Err(_) => {
+                println!("Lost connection with server!");
+                break;
+            }
+        }
+
+        /* Send message in channel to server. */
+        match receiver.try_recv() {
+            // received message from channel
+            Ok(msg) => {
+                let mut msg_buffer = msg.clone().into_bytes();
+                // add zero character to mark end of message
+                msg_buffer.resize(MSG_SIZE, 0);
+
+                if client.write_all(&msg_buffer).is_err() {
+                    println!("Failed to send message!")
+                }
+            }
+            // no message in channel
+            Err(TryRecvError::Empty) => (),
+            // channel has been disconnected (main thread has terminated)
+            Err(TryRecvError::Disconnected) => break,
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    });
+
+    return sender;
+}
+
 pub fn main() -> GameResult {
     let resource_dir = path::PathBuf::from("./resources");
 
@@ -310,6 +408,10 @@ pub fn main() -> GameResult {
     );
     let (mut contex, event_loop) = context_builder.build().expect("Failed to build context.");
 
-    let state = AppState::new(&mut contex).expect("Failed to create state.");
+    // connect to our server
+    let sender = online_setup();
+
+    let state = AppState::new(&mut contex, sender).expect("Failed to create state.");
+
     event::run(contex, event_loop, state) // Run window event loop
 }
