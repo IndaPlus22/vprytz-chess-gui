@@ -13,7 +13,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 /* address to server. */
 const SERVER_ADDR: &str = "127.0.0.1:6000"; // default
