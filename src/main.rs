@@ -13,7 +13,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /* address to server. */
 const SERVER_ADDR: &str = "127.0.0.1:6000"; // default
@@ -50,6 +50,7 @@ struct AppState {
     room_name: String,                              // name of the room (online)
     online_color: Colour,                           // color of the player (online)
     counter: u32,                                   // counter for the number of moves
+    start_time: SystemTime,                         // time when the game started
 }
 
 impl AppState {
@@ -60,6 +61,7 @@ impl AppState {
         to_mainthread_receiver: mpsc::Receiver<String>,
         room_name: String,
         color: Colour,
+        start_time: SystemTime,
     ) -> GameResult<AppState> {
         // A cool way to instantiate the board
         // You can safely delete this if the chess-library already does this
@@ -74,6 +76,7 @@ impl AppState {
             room_name: room_name,
             online_color: color,
             counter: 1,
+            start_time: start_time,
         };
 
         Ok(state)
@@ -249,11 +252,29 @@ impl event::EventHandler<GameError> for AppState {
         graphics::draw(ctx, &background_box, graphics::DrawParam::default())
             .expect("Failed to draw background.");
 
+        // calculate difference in unix epoch timestamp between now and when the game started
+        // convert the difference to readable minutes and seconds like "01:43" means 1 minute and 43 seconds
+        let time = self
+            .start_time
+            .elapsed()
+            .expect("error converting time")
+            .as_secs()
+            .div_euclid(60)
+            .to_string()
+            + ":"
+            + &(self
+                .start_time
+                .elapsed()
+                .expect("error converting time")
+                .as_secs()
+                .rem_euclid(60)
+                .to_string());
+
         // draw text at bottom  of screen
         let bottom_text = graphics::Text::new(
             graphics::TextFragment::from(format!(
-                "Room: {}  Turn: {}",
-                self.room_name, self.counter
+                "Room: {}  Turn: {}     Time: {}",
+                self.room_name, self.counter, time
             ))
             .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
         );
@@ -642,6 +663,9 @@ pub fn main() -> GameResult {
 
     println!("Opponent joined!");
 
+    // get current unix time
+    let start_time = SystemTime::now();
+
     // create state
     let state = AppState::new(
         &mut contex,
@@ -649,6 +673,7 @@ pub fn main() -> GameResult {
         to_mainthread_receiver,
         room_name.trim_end().to_string(),
         color,
+        start_time,
     )
     .expect("Failed to create state.");
 
