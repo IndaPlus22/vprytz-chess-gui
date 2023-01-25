@@ -251,8 +251,11 @@ impl event::EventHandler<GameError> for AppState {
 
         // draw text at bottom  of screen
         let bottom_text = graphics::Text::new(
-            graphics::TextFragment::from(format!("Turn: {}", self.counter))
-                .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
+            graphics::TextFragment::from(format!(
+                "Room: {}  Turn: {}",
+                self.room_name, self.counter
+            ))
+            .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
         );
 
         // get dimensions of bottom status text
