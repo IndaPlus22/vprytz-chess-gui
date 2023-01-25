@@ -128,17 +128,11 @@ impl event::EventHandler<GameError> for AppState {
 
                 // check if message is for this room
                 if room_name != self.room_name {
-                    // print both
-                    println!("room_name: {}", room_name);
-                    println!("self.room_name: {}", self.room_name);
-
                     return Ok(());
                 }
 
                 // check what command the message is (e.g. if it's mv)
                 let command = msg.next().unwrap();
-
-                println!("command: {}", command);
 
                 // check if message is a move
                 if command == "reset" {
@@ -163,20 +157,16 @@ impl event::EventHandler<GameError> for AppState {
                     from_pos_col.parse::<usize>().unwrap(),
                 )
                 .unwrap();
-                println!("from_pos: {:?}", from_pos);
 
                 // get to_pos
                 let to_pos_row = msg.next().unwrap();
                 let to_pos_col = msg.next().unwrap();
-                println!("to_pos_row: {:?}", to_pos_row);
-                println!("to_pos_col: {:?}", to_pos_col);
 
                 let to_pos = Position::new(
                     to_pos_row.parse::<usize>().unwrap(),
                     to_pos_col.parse::<usize>().unwrap(),
                 )
                 .unwrap();
-                println!("to_pos: {:?}", to_pos);
 
                 // make move using message from server
                 let new_game_state = self.game.make_move_pos(from_pos, to_pos);
@@ -477,7 +467,6 @@ fn online_setup() -> (
                     .collect::<Vec<_>>();
                 let msg = String::from_utf8(_msg).expect("Invalid UTF-8 message!");
 
-                println!("Message: {:?}", msg);
                 // send this message to main thread
                 to_mainthread_sender.send(format!("{:?}", msg)).unwrap();
             }
