@@ -29,7 +29,7 @@ const GRID_CELL_SIZE: (i16, i16) = (90, 90);
 /// Size of the application window.
 const SCREEN_SIZE: (f32, f32) = (
     GRID_SIZE as f32 * GRID_CELL_SIZE.0 as f32,
-    GRID_SIZE as f32 * GRID_CELL_SIZE.1 as f32,
+    GRID_SIZE as f32 * GRID_CELL_SIZE.1 as f32 + 40.0,
 );
 
 // GUI Color representations
@@ -49,6 +49,7 @@ struct AppState {
     to_mainthread_receiver: mpsc::Receiver<String>, // for sending messages from network thread to main thread
     room_name: String,                              // name of the room (online)
     online_color: Colour,                           // color of the player (online)
+    counter: u32,                                   // counter for the number of moves
 }
 
 impl AppState {
@@ -72,6 +73,7 @@ impl AppState {
             to_mainthread_receiver: to_mainthread_receiver,
             room_name: room_name,
             online_color: color,
+            counter: 1,
         };
 
         Ok(state)
@@ -139,6 +141,7 @@ impl event::EventHandler<GameError> for AppState {
                     self.game = Game::new();
                     self.positions = vec![];
                     self.selected_position = None;
+                    self.counter = 1;
                     return Ok(());
                 }
 
@@ -146,8 +149,24 @@ impl event::EventHandler<GameError> for AppState {
                     return Ok(());
                 }
 
-                // get turn
-                let turn = msg.next().unwrap();
+                // get turn counter
+                let turn_counter = msg.next().unwrap();
+
+                // if turn counter is equal to our counter, we don't need to do anything
+                if turn_counter.parse::<u32>().unwrap() == self.counter {
+                    return Ok(());
+                }
+
+                // if the turn counter is less than one of our counter or if the turn counter is greater than our counter, we're out of sync
+                if turn_counter.parse::<u32>().unwrap() < self.counter
+                    || turn_counter.parse::<u32>().unwrap() > self.counter + 1
+                {
+                    // print value of turn counter and our counter
+                    println!("remote {}, local {}", turn_counter, self.counter);
+                    // exit game
+                    println!("Out of sync with online opponent, exiting game");
+                    std::process::exit(0);
+                }
 
                 // get from_pos
                 let from_pos_row = msg.next().unwrap();
@@ -175,6 +194,7 @@ impl event::EventHandler<GameError> for AppState {
                 if new_game_state.is_ok() {
                     self.selected_position = None;
                     self.positions = vec![];
+                    self.counter += 1;
                 }
             }
             // no message in channel
@@ -228,6 +248,15 @@ impl event::EventHandler<GameError> for AppState {
         // draw background
         graphics::draw(ctx, &background_box, graphics::DrawParam::default())
             .expect("Failed to draw background.");
+
+        // draw text at bottom  of screen
+        let bottom_text = graphics::Text::new(
+            graphics::TextFragment::from(format!("Turn: {}", self.counter))
+                .scale(graphics::PxScale { x: 30.0, y: 30.0 }),
+        );
+
+        // get dimensions of bottom status text
+        let bottom_text_dimensions = bottom_text.dimensions(ctx);
 
         // draw grid
         for row in 0..8 {
@@ -316,6 +345,19 @@ impl event::EventHandler<GameError> for AppState {
         )
         .expect("Failed to draw text.");
 
+        // draw status text at bottom
+        graphics::draw(
+            ctx,
+            &bottom_text,
+            graphics::DrawParam::default()
+                .color([0.0, 0.0, 0.0, 1.0].into())
+                .dest(ggez::mint::Point2 {
+                    x: 5.0,
+                    y: SCREEN_SIZE.1 - bottom_text_dimensions.h as f32,
+                }),
+        )
+        .expect("Failed to draw text.");
+
         // render updated graphics
         graphics::present(ctx).expect("Failed to update graphics.");
 
@@ -360,12 +402,6 @@ impl event::EventHandler<GameError> for AppState {
 
             // check if clicked position is in self.positions
             if self.positions.contains(&Position::new(row, col).unwrap()) {
-                // get current turn color as string
-                let turn = match self.game.get_active_colour() {
-                    Colour::White => "W",
-                    Colour::Black => "B",
-                };
-
                 let new_game_state = self.game.make_move_pos(
                     self.selected_position.unwrap(),
                     Position::new(row, col).unwrap(),
@@ -381,11 +417,14 @@ impl event::EventHandler<GameError> for AppState {
 
                 // if new_game_state.is_ok(), then the move was successful and we remove the selected position
                 if new_game_state.is_ok() {
+                    // increment move counter
+                    self.counter += 1;
+
                     // send move to server
                     self.sender
                         .send(format!(
                             "{} mv {} {} {} ",
-                            self.room_name, turn, from_position, to_position
+                            self.room_name, self.counter, from_position, to_position
                         ))
                         .unwrap();
 
@@ -412,6 +451,7 @@ impl event::EventHandler<GameError> for AppState {
                 self.game = Game::new();
                 self.positions = vec![];
                 self.selected_position = None;
+                self.counter = 1;
 
                 // send reset to server
                 self.sender
