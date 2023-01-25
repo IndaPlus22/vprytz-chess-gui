@@ -381,6 +381,11 @@ impl event::EventHandler<GameError> for AppState {
             // convert row, col to idx
             let idx = row * 8 + col;
 
+            // ignore if idx is larger than 63
+            if idx > 63 {
+                return;
+            }
+
             // check if the selected position has a piece and that it's the player's turn
             if let Some(piece) = self.game.get_board()[idx] {
                 if piece.colour == self.game.get_active_colour()
