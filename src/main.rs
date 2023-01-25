@@ -423,7 +423,9 @@ impl event::EventHandler<GameError> for AppState {
     }
 }
 
-fn online_setup() -> (
+fn online_setup(
+    server_addr: &str,
+) -> (
     std::sync::mpsc::Sender<String>,
     std::sync::mpsc::Receiver<String>,
 ) {
@@ -431,13 +433,13 @@ fn online_setup() -> (
     // Original Author: Tensor-Programming, Viola Söderlund <violaso@kth.se>
 
     // connect to server
-    let mut client = match TcpStream::connect(SERVER_ADDR) {
+    let mut client = match TcpStream::connect(server_addr) {
         Ok(_client) => {
-            println!("Connected to server at: {}", SERVER_ADDR);
+            println!("Connected to server at: {}", server_addr);
             _client
         }
         Err(_) => {
-            println!("Failed to connect to server at: {}", SERVER_ADDR);
+            println!("Failed to connect to server at: {}", server_addr);
             std::process::exit(1)
         }
     };
@@ -523,8 +525,25 @@ pub fn main() -> GameResult {
     );
     let (mut contex, event_loop) = context_builder.build().expect("Failed to build context.");
 
+    // input server IP and port
+    let mut server_addr = String::new();
+    println!(
+        "Enter server IP and port (press enter to use default {}): ",
+        SERVER_ADDR
+    );
+
+    io::stdin()
+        .read_line(&mut server_addr)
+        .expect("Failed to read line");
+
+    if server_addr.trim_end() != "" {
+        server_addr = server_addr.trim_end().to_string();
+    } else {
+        server_addr = SERVER_ADDR.to_string();
+    }
+
     // connect to our server
-    let (sender, to_mainthread_receiver) = online_setup();
+    let (sender, to_mainthread_receiver) = online_setup(&server_addr);
 
     // wait for user to input room name
     let mut room_name = String::new();
