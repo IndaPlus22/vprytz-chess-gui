@@ -10,3 +10,4 @@ edition = "2021"
 chess_template = { git = "https://github.com/IndaPlus22/eskilny-task-3.git" } # Replace this with the library you want to use
 linked-hash-map = "0.5.4" 
 ggez = "0.6.1"
+rand = "0.8.4"
