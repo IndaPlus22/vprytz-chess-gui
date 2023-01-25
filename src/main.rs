@@ -8,14 +8,15 @@ use std::process::exit;
 use std::{collections::HashMap, path};
 
 // for online play
-use std::io::{ErrorKind, Read, Write};
+use rand::prelude::*;
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
 /* address to server. */
-const SERVER_ADDR: &str = "127.0.0.1:6000";
+const SERVER_ADDR: &str = "127.0.0.1:6000"; // default
 
 /* max message size in characters. */
 const MSG_SIZE: usize = 64;
@@ -46,6 +47,8 @@ struct AppState {
     selected_position: Option<Position>, // hold position of the selected piece
     sender: mpsc::Sender<String>, // for sending messages to server
     to_mainthread_receiver: mpsc::Receiver<String>, // for sending messages from network thread to main thread
+    room_name: String,                              // name of the room (online)
+    online_color: Colour,                           // color of the player (online)
 }
 
 impl AppState {
@@ -54,6 +57,8 @@ impl AppState {
         ctx: &mut Context,
         sender: mpsc::Sender<String>,
         to_mainthread_receiver: mpsc::Receiver<String>,
+        room_name: String,
+        color: Colour,
     ) -> GameResult<AppState> {
         // A cool way to instantiate the board
         // You can safely delete this if the chess-library already does this
@@ -65,6 +70,8 @@ impl AppState {
             selected_position: None,
             sender: sender, // mpsc::Sender::clone(&sender)
             to_mainthread_receiver: to_mainthread_receiver,
+            room_name: room_name,
+            online_color: color,
         };
 
         Ok(state)
@@ -112,9 +119,38 @@ impl event::EventHandler<GameError> for AppState {
                 let msg = String::from_utf8(msg_buffer).unwrap();
 
                 // split message into turn and from_pos (row, col) and to_pos (row, col)
-                // example: W 1 1 3 3
+                // example: {room_name} mv W 1 1 3 3
                 // means turn is White, and the piece at (1, 1) is moving to (3, 3)
                 let mut msg = msg.split_whitespace();
+
+                // get room name
+                let room_name = msg.next().unwrap().split_at(1).1.to_string();
+
+                // check if message is for this room
+                if room_name != self.room_name {
+                    // print both
+                    println!("room_name: {}", room_name);
+                    println!("self.room_name: {}", self.room_name);
+
+                    return Ok(());
+                }
+
+                // check what command the message is (e.g. if it's mv)
+                let command = msg.next().unwrap();
+
+                println!("command: {}", command);
+
+                // check if message is a move
+                if command == "reset" {
+                    self.game = Game::new();
+                    self.positions = vec![];
+                    self.selected_position = None;
+                    return Ok(());
+                }
+
+                if command != "mv" {
+                    return Ok(());
+                }
 
                 // get turn
                 let turn = msg.next().unwrap();
@@ -172,9 +208,10 @@ impl event::EventHandler<GameError> for AppState {
             splash_text = "Game Over, press R to restart!".to_string();
         } else {
             splash_text = format!(
-                "Game is {:?}, it's {:?} turn.",
+                "{:?}, it's {:?} turn. You're {:?}",
                 self.game.get_game_state(),
-                self.game.get_active_colour()
+                self.game.get_active_colour(),
+                self.online_color
             );
         }
 
@@ -314,7 +351,9 @@ impl event::EventHandler<GameError> for AppState {
 
             // check if the selected position has a piece and that it's the player's turn
             if let Some(piece) = self.game.get_board()[idx] {
-                if piece.colour == self.game.get_active_colour() {
+                if piece.colour == self.game.get_active_colour()
+                    && self.game.get_active_colour() == self.online_color
+                {
                     // convert row and column to Position
                     let position = Position::new(row, col);
 
@@ -354,7 +393,10 @@ impl event::EventHandler<GameError> for AppState {
                 if new_game_state.is_ok() {
                     // send move to server
                     self.sender
-                        .send(format!("{} {} {} ", turn, from_position, to_position))
+                        .send(format!(
+                            "{} mv {} {} {} ",
+                            self.room_name, turn, from_position, to_position
+                        ))
                         .unwrap();
 
                     self.selected_position = None;
@@ -380,6 +422,11 @@ impl event::EventHandler<GameError> for AppState {
                 self.game = Game::new();
                 self.positions = vec![];
                 self.selected_position = None;
+
+                // send reset to server
+                self.sender
+                    .send(format!("{} reset ", self.room_name))
+                    .unwrap();
             }
             _ => (),
         }
@@ -490,8 +537,64 @@ pub fn main() -> GameResult {
     // connect to our server
     let (sender, to_mainthread_receiver) = online_setup();
 
-    let state = AppState::new(&mut contex, sender, to_mainthread_receiver)
-        .expect("Failed to create state.");
+    // wait for user to input room name
+    let mut room_name = String::new();
+    println!("Enter room name: ");
+    io::stdin()
+        .read_line(&mut room_name)
+        .expect("Failed to read line");
+
+    // generate random  number
+    let mut rng = rand::thread_rng();
+    let random_number: u8 = rng.gen();
+
+    // send room name to server, along with random number as identifier
+    sender
+        .send(format!("room {} {} ", room_name.trim_end(), random_number))
+        .unwrap();
+
+    // wait for oponnent to join
+    println!("Waiting for opponent to join...");
+    let mut opponent_joined = false;
+
+    let mut color = Colour::White;
+
+    while !opponent_joined {
+        let msg = to_mainthread_receiver.recv().unwrap();
+        if msg.contains(format!("{}", room_name.trim_end()).as_str()) {
+            // check that the random_number part is not our random_number
+            let msg_parts: Vec<&str> = msg.split(" ").collect();
+            if msg_parts[2] != format!("{}", random_number) {
+                opponent_joined = true;
+
+                // if our random_number is lower than the other player's random_number, we are white
+                if random_number < msg_parts[2].parse::<u8>().unwrap() {
+                    println!("You are white!");
+                    color = Colour::White;
+                } else {
+                    println!("You are black!");
+                    color = Colour::Black;
+                }
+
+                // send message to other player that we have joined
+                sender
+                    .send(format!("room {} {} ", room_name.trim_end(), random_number))
+                    .unwrap();
+            }
+        }
+    }
+
+    println!("Opponent joined!");
+
+    // create state
+    let state = AppState::new(
+        &mut contex,
+        sender,
+        to_mainthread_receiver,
+        room_name.trim_end().to_string(),
+        color,
+    )
+    .expect("Failed to create state.");
 
     event::run(contex, event_loop, state) // Run window event loop
 }

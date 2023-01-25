@@ -2435,6 +2435,7 @@ dependencies = [
  "chess_template",
  "ggez",
  "linked-hash-map",
+ "rand",
 ]
 
 [[package]]
